@@ -32,11 +32,39 @@ if not SECRET_KEY:
 
 # Host validation: comma-separated list, whitespace trimmed, no wildcard in production
 allowed_hosts_raw = os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1')
-ALLOWED_HOSTS = [host.strip() for host in allowed_hosts_raw.split(',') if host.strip()]
-if DEBUG:
-    for local_host in ['localhost', '127.0.0.1', 'testserver']:
-        if local_host not in ALLOWED_HOSTS:
-            ALLOWED_HOSTS.append(local_host)
+ALLOWED_HOSTS = []
+for host in allowed_hosts_raw.split(','):
+    host = host.strip()
+    if host.startswith('http://'):
+        host = host[7:]
+    elif host.startswith('https://'):
+        host = host[8:]
+    host = host.rstrip('/')
+    if host and host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(host)
+
+# Always allow local loopback interfaces for development and internal serverless proxying
+for local_host in ['localhost', '127.0.0.1', 'testserver']:
+    if local_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(local_host)
+
+# Automatically permit Vercel deployment domains
+for vercel_domain in ['.vercel.app', 'resume-agent-backend-kappa.vercel.app']:
+    if vercel_domain not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(vercel_domain)
+
+vercel_url = os.getenv('VERCEL_URL', '').strip().rstrip('/')
+if vercel_url:
+    if vercel_url.startswith('https://'):
+        vercel_url = vercel_url[8:]
+    elif vercel_url.startswith('http://'):
+        vercel_url = vercel_url[7:]
+    if vercel_url and vercel_url not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(vercel_url)
+
+# Trust reverse-proxy headers from Vercel edge infrastructure
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
 
 
 # Application definition
@@ -226,6 +254,19 @@ CORS_ALLOW_CREDENTIALS = True
 csrf_trusted_raw = os.getenv('CSRF_TRUSTED_ORIGINS', 'http://localhost:5173,http://127.0.0.1:5173')
 CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in csrf_trusted_raw.split(',') if origin.strip()]
 
+# Sync trusted origins with CORS origins and Vercel domains
+for origin in CORS_ALLOWED_ORIGINS:
+    if origin not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(origin)
+
+for default_trusted in [
+    'https://resume-agent-backend-kappa.vercel.app',
+    'https://resume-agent-flame.vercel.app',
+    'https://*.vercel.app'
+]:
+    if default_trusted not in CSRF_TRUSTED_ORIGINS:
+        CSRF_TRUSTED_ORIGINS.append(default_trusted)
+
 # Security Headers
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'
@@ -253,16 +294,22 @@ FILE_UPLOAD_MAX_MEMORY_SIZE = int(os.getenv('FILE_UPLOAD_MAX_MEMORY_SIZE', 10 * 
 
 
 # Email Configuration (Environment-driven, supports Console and SMTP backends)
-EMAIL_BACKEND = os.getenv(
-    'EMAIL_BACKEND',
-    'django.core.mail.backends.console.EmailBackend' if DEBUG else 'django.core.mail.backends.smtp.EmailBackend'
+EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '').strip()
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '').replace(' ', '').strip()
+
+# Determine default email backend:
+# Only default to SMTP if SMTP credentials are provided, or if explicitly configured via EMAIL_BACKEND.
+# Otherwise, fall back to console backend so build/import steps without credentials do not crash.
+default_email_backend = (
+    'django.core.mail.backends.smtp.EmailBackend'
+    if (EMAIL_HOST_USER and EMAIL_HOST_PASSWORD)
+    else 'django.core.mail.backends.console.EmailBackend'
 )
+EMAIL_BACKEND = os.getenv('EMAIL_BACKEND', default_email_backend)
 EMAIL_HOST = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
 EMAIL_PORT = int(os.getenv('EMAIL_PORT', 587))
 EMAIL_USE_TLS = os.getenv('EMAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes')
 EMAIL_USE_SSL = os.getenv('EMAIL_USE_SSL', 'False').lower() in ('true', '1', 'yes')
-EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '').strip()
-EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '').replace(' ', '').strip()
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Resume Agent <noreply@resumeagent.ai>').strip()
 
 # Frontend application URL for password reset and notification links
