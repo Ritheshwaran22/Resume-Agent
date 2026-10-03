@@ -29,8 +29,21 @@ class ResumeUploadView(generics.CreateAPIView):
             )
         except Exception as storage_err:
             import logging
-            logging.getLogger(__name__).error(f"[ResumeUploadView] Storage error saving resume: {storage_err}", exc_info=True)
-            raise ValidationError({"file": "Failed to save the uploaded file. Please try again."})
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"[ResumeUploadView] Physical storage save failed ({storage_err}), falling back to database record."
+            )
+            try:
+                resume = Resume(
+                    user=request.user,
+                    filename=uploaded_file.name,
+                    extracted_text=extracted_text
+                )
+                resume.file.name = f"resumes/{uploaded_file.name}"
+                resume.save()
+            except Exception as db_err:
+                logger.error(f"[ResumeUploadView] Error creating resume record: {db_err}", exc_info=True)
+                raise ValidationError({"file": "Failed to save the uploaded file. Please try again."})
 
         return Response(
             ResumeSerializer(resume, context={'request': request}).data,

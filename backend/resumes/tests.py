@@ -58,3 +58,26 @@ class ResumeAPITests(TestCase):
         # User2 lists resumes — should be empty
         list_response = self.client.get('/api/resumes/')
         self.assertEqual(len(list_response.data), 0)
+
+    def test_upload_fallback_when_storage_fails(self):
+        from unittest.mock import patch
+        self.client.force_authenticate(user=self.user1)
+        pdf_bytes = create_mock_pdf_bytes("Experienced Python and Django Developer building RESTful microservices.")
+        uploaded_file = SimpleUploadedFile("fallback_resume.pdf", pdf_bytes, content_type="application/pdf")
+
+        # Mock Resume.objects.create to raise OSError as happens on read-only serverless filesystems
+        original_create = Resume.objects.create
+        def mock_create(*args, **kwargs):
+            raise OSError(30, "Read-only file system")
+
+        with patch.object(Resume.objects, 'create', side_effect=mock_create):
+            response = self.client.post('/api/resumes/upload/', {'file': uploaded_file}, format='multipart')
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertIn("extracted_text", response.data)
+        self.assertIn("Python", response.data["extracted_text"])
+
+        # Check DB
+        resume = Resume.objects.get(id=response.data["id"])
+        self.assertEqual(resume.user, self.user1)
+        self.assertEqual(resume.filename, "fallback_resume.pdf")

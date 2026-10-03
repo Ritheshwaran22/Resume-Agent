@@ -210,7 +210,12 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # Media files (Resume uploads)
 MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+if os.getenv('VERCEL') == '1' or os.getenv('VERCEL_ENV'):
+    import tempfile
+    MEDIA_ROOT = Path(tempfile.gettempdir()) / 'media'
+else:
+    MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_ROOT.mkdir(parents=True, exist_ok=True)
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
